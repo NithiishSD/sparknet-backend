@@ -1,0 +1,279 @@
+import User from '../../models/User.js';
+import Report from '../../models/Report.js';
+import Post from '../../models/Post.js';
+import Comment from '../../models/Comment.js';
+import { sendAccountStatusEmail } from '../../utils/Email.js';
+
+const { ACCOUNT_STATUS, ROLES, MODES } = User;
+
+// ─────────────────────────────────────────────────────────────
+// @route   GET /api/admin/users
+// ─────────────────────────────────────────────────────────────
+export const getUsers = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+
+    const filter = {};
+    if (req.query.role) filter.role = req.query.role;
+    if (req.query.status) filter.status = req.query.status;
+    if (req.query.mode) filter.mode = req.query.mode;
+    // Filter by guardian capability: users who have at least one child linked
+    if (req.query.isGuardian === 'true') filter['childLinks.0'] = { $exists: true };
+    if (req.query.search) {
+      filter.$or = [
+        { username: new RegExp(req.query.search, 'i') },
+        { email: new RegExp(req.query.search, 'i') },
+      ];
+    }
+
+    const total = await User.countDocuments(filter);
+    const users = await User.find(filter)
+      .select('username email role mode status createdAt lastLoginAt loginAttempts childLinks guardianId')
+      .skip(skip)
+      .limit(limit)
+      .sort({ createdAt: -1 });
+
+    // Add computed isGuardian to each user in response
+    const usersWithCapabilities = users.map((u) => ({
+      ...u.toObject(),
+      isGuardian: u.role === ROLES.USER && (u.childLinks?.length || 0) > 0,
+      linkedChildrenCount: u.childLinks?.length || 0,
+    }));
+
+    res.json({ success: true, total, page, pages: Math.ceil(total / limit), users: usersWithCapabilities });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// @route   GET /api/admin/users/:id
+// ─────────────────────────────────────────────────────────────
+export const getUser = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id)
+      .populate('guardianId', 'username email')
+      .populate('childLinks.childId', 'username email status');
+
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    res.json({
+      success: true,
+      user: {
+        ...user.toObject(),
+        isGuardian: user.role === ROLES.USER && (user.childLinks?.length || 0) > 0,
+        linkedChildrenCount: user.childLinks?.length || 0,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// @route   PATCH /api/admin/users/:id/status
+// ─────────────────────────────────────────────────────────────
+export const updateUserStatus = async (req, res) => {
+  try {
+    const { status, reason } = req.body;
+    if (!Object.values(ACCOUNT_STATUS).includes(status)) {
+      return res.status(400).json({ success: false, message: 'Invalid status' });
+    }
+
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (user.role === ROLES.ADMIN && req.user._id.toString() !== user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Cannot modify other admin accounts' });
+    }
+
+    const prev = user.status;
+    user.status = status;
+
+    if ([ACCOUNT_STATUS.BANNED, ACCOUNT_STATUS.SUSPENDED].includes(status)) {
+      user.sessions = []; // Immediate session termination
+    }
+
+    await user.save({ validateBeforeSave: false });
+    await sendAccountStatusEmail(user.email, user.username, status, reason);
+
+    res.json({ success: true, message: `Status changed from ${prev} to ${status}`, user: { id: user._id, username: user.username, status } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// @route   POST /api/admin/users/:id/force-logout
+// ─────────────────────────────────────────────────────────────
+export const forceLogout = async (req, res) => {
+  try {
+    await User.findByIdAndUpdate(req.params.id, { $set: { sessions: [] } });
+    res.json({ success: true, message: 'All user sessions cleared' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// @route   GET /api/admin/users/:id/activity
+// ─────────────────────────────────────────────────────────────
+export const getUserActivity = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id).select(
+      'username loginHistory sessions lastLoginAt lastLoginIp role mode'
+    );
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    res.json({
+      success: true,
+      activity: {
+        username: user.username,
+        role: user.role,
+        mode: user.mode,
+        lastLoginAt: user.lastLoginAt,
+        lastLoginIp: user.lastLoginIp,
+        activeSessions: user.sessions,
+        loginHistory: user.loginHistory.slice(-50),
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// @route   PATCH /api/admin/users/:id/mode
+// @desc    Toggle or set mode (normal / youth) for any user
+// ─────────────────────────────────────────────────────────────
+export const setUserMode = async (req, res) => {
+  try {
+    const { mode } = req.body;
+    if (!Object.values(MODES).includes(mode)) {
+      return res.status(400).json({ success: false, message: 'Mode must be normal or youth' });
+    }
+
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    user.mode = mode;
+    user.sessions = []; // Force re-login so new token reflects updated mode
+    await user.save({ validateBeforeSave: false });
+
+    res.json({ success: true, message: `Mode set to ${mode} for ${user.username}. Sessions cleared.` });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// @route   GET /api/admin/stats
+// @desc    Platform overview stats
+// ─────────────────────────────────────────────────────────────
+export const getStats = async (req, res) => {
+  try {
+    const [totalUsers, totalChildren, activeUsers, bannedUsers, guardians] = await Promise.all([
+      User.countDocuments({ role: ROLES.USER }),
+      User.countDocuments({ role: ROLES.CHILD }),
+      User.countDocuments({ status: ACCOUNT_STATUS.ACTIVE }),
+      User.countDocuments({ status: ACCOUNT_STATUS.BANNED }),
+      // Guardians = users with at least one child link
+      User.countDocuments({ role: ROLES.USER, 'childLinks.0': { $exists: true } }),
+    ]);
+
+    res.json({
+      success: true,
+      stats: {
+        totalUsers,
+        totalChildren,
+        activeUsers,
+        bannedUsers,
+        guardians,
+        youthModeUsers: await User.countDocuments({ mode: MODES.YOUTH }),
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// @route   GET /api/admin/reports
+// @desc    Fetch content reports from the community
+// ─────────────────────────────────────────────────────────────
+export const getReports = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+
+    const reports = await Report.find()
+      .populate('reporter_id', 'username email')
+      .sort({ status: 1, createdAt: -1 }) // pending first, then newest
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const total = await Report.countDocuments();
+
+    // Populate target data dynamically depending on whether it's a post or comment
+    const populatedReports = await Promise.all(reports.map(async (report) => {
+      let targetDoc = null;
+      if (report.type === 'post') {
+        targetDoc = await Post.findById(report.target_id).populate('user', 'username email').lean();
+      } else if (report.type === 'comment') {
+        targetDoc = await Comment.findById(report.target_id).populate('user', 'username email').lean();
+      }
+      return { ...report, target: targetDoc };
+    }));
+
+    res.json({
+      success: true,
+      page,
+      pages: Math.ceil(total / limit),
+      total,
+      reports: populatedReports
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// @route   PATCH /api/admin/reports/:id/resolve
+// @desc    Resolve a community report
+// ─────────────────────────────────────────────────────────────
+export const resolveReport = async (req, res) => {
+  try {
+    const reportId = req.params.id;
+    const { action } = req.body; // 'dismiss', 'ban_content', 'ban_user'
+
+    const report = await Report.findById(reportId);
+    if (!report) {
+      return res.status(404).json({ success: false, message: 'Report not found' });
+    }
+
+    if (action === 'dismiss') {
+      report.status = 'resolved';
+      await report.save();
+      return res.json({ success: true, message: 'Report dismissed successfully' });
+    }
+
+    // Advanced actions: ban content
+    if (action === 'ban_content') {
+      if (report.type === 'post') {
+        await Post.findByIdAndUpdate(report.target_id, { visibility: 'private', is_flagged: true, moderation_remark: 'Banned by admin via report' });
+      } else if (report.type === 'comment') {
+        await Comment.findByIdAndDelete(report.target_id);
+      }
+      report.status = 'resolved';
+      await report.save();
+      return res.json({ success: true, message: 'Content banned/removed successfully' });
+    }
+
+    return res.status(400).json({ success: false, message: 'Invalid action' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
