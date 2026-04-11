@@ -16,13 +16,14 @@ import Post from '../../models/Post.js';
 // ─────────────────────────────────────────────────────────────────────────────
 export const checkContent = async (req, res) => {
   try {
-    const { content_text } = req.body;
+    const { content_text, content: fallback_content } = req.body;
+    const final_content = content_text || fallback_content;
 
-    if (!content_text) {
+    if (!final_content) {
       return res.status(400).json({ success: false, message: 'Content text is required' });
     }
 
-    const moderation = await analyzeContent(content_text);
+    const moderation = await analyzeContent(final_content);
 
     return res.status(200).json({
       success: true,

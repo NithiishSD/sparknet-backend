@@ -26,8 +26,11 @@ import ActivityLog, { ACTIVITY_TYPES } from '../../models/ActivityLog.js';
 // ─────────────────────────────────────────────────────────────────────────────
 export const createPost = async (req, res) => {
   try {
-    const { content_text, visibility, tags } = req.body;
+    const { content_text: incoming_text, content: fallback_text, visibility, tags } = req.body;
     let { media_url } = req.body;
+    
+    // Resolve content_text (fallback to 'content' if provided)
+    const content_text = incoming_text || fallback_text;
     
     // If a file was uploaded via Cloudinary middleware
     if (req.file) {
@@ -192,7 +195,8 @@ export const getSinglePost = async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 export const editPost = async (req, res) => {
   try {
-    const { content_text, tags, visibility } = req.body;
+    const { content_text: incoming_text, content: fallback_text, tags, visibility } = req.body;
+    const content_text = incoming_text || fallback_text;
     const post = await Post.findById(req.params.id);
 
     if (!post) {

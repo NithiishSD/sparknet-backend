@@ -121,8 +121,7 @@ const userSchema = new mongoose.Schema(
       default: MODES.NORMAL,
     },
     googleId: {
-      type: String,
-      default: null
+      type: String
     },
     needsOnboarding: {
       type: Boolean,
@@ -219,16 +218,13 @@ const userSchema = new mongoose.Schema(
     ],
    
     facebookId: {
-      type: String,
-      default: null
+      type: String
     },
     twitterId: {
-      type: String,
-      default: null
+      type: String
     },
     appleId: {
-      type: String,
-      default: null
+      type: String
     },
    
     // ─── OAuth Onboarding Flag ─────────────────────────────────────────────────
