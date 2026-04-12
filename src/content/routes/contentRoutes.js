@@ -15,6 +15,7 @@ import {
   createPost,
   getFeed,
   editPost,
+  patchPost,
   deletePost,
   getSinglePost,
   getUserPosts,
@@ -83,7 +84,8 @@ router.delete('/comments/:commentId',         protect, deleteComment);  // Delet
 
 // Post CRUD
 router.get   ('/:id',  protect, guardContent, getSinglePost);         // View a single post
-router.put   ('/:id',  protect, guardContent, editPost);              // Edit own post
+router.put   ('/:id',  protect, guardContent, editPost);              // Edit own post (admin too)
+router.patch ('/:id',  protect, patchPost);                           // Author-only partial edit
 router.delete('/:id',  protect, deletePost);                          // Delete own post — no guard
 
 // Reactions & saves on a post

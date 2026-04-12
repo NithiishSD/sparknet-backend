@@ -37,7 +37,10 @@ const postSchema = new mongoose.Schema({
   // ── Safety & Moderation Fields ───────────────────────────────────────────
   is_flagged:        { type: Boolean, default: false },
   risk_score:        { type: Number,  default: 0, min: 0, max: 1 },
+  safety_score:      { type: Number,  default: 0, min: 0, max: 1 },
+  safety_label:      { type: String,  default: 'SAFE' },
   moderation_remark: { type: String,  default: null },
+  editedAt:          { type: Date,    default: null },
 
 }, { timestamps: true });
 

@@ -52,6 +52,11 @@ export const approveChild = async (req, res) => {
     child.status = child.isEmailVerified
       ? ACCOUNT_STATUS.ACTIVE
       : ACCOUNT_STATUS.PENDING_VERIFICATION;
+
+    // COPPA/GDPR: record verifiable parental consent
+    child.consentGivenAt = new Date();
+    child.consentIp      = req.ip || req.connection?.remoteAddress || 'unknown';
+
     await child.save({ validateBeforeSave: false });
 
     // Add child to guardian's childLinks if not already there

@@ -99,3 +99,43 @@ export const resetProfile = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// Search Users
+export const searchUsers = async (req, res) => {
+  try {
+    const { query } = req.query;
+    if (!query) {
+      return res.status(200).json({ success: true, data: [] });
+    }
+
+    const regex = new RegExp(query, 'i');
+    const users = await User.find({ username: regex })
+      .select('username oauthAvatarUrl role status')
+      .limit(20)
+      .lean();
+
+    // Fetch corresponding profiles to get displayName and bio
+    const userIds = users.map(u => u._id);
+    const profiles = await Profile.find({ user: { $in: userIds } })
+      .select('user displayName bio avatar')
+      .lean();
+
+    const data = users.map(user => {
+      const profileInfo = profiles.find(p => String(p.user) === String(user._id));
+      return {
+        _id: user._id,
+        username: user.username,
+        role: user.role,
+        status: user.status,
+        oauthAvatarUrl: user.oauthAvatarUrl,
+        displayName: profileInfo?.displayName,
+        bio: profileInfo?.bio,
+        avatar: profileInfo?.avatar
+      };
+    });
+
+    res.status(200).json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};

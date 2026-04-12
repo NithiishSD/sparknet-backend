@@ -31,7 +31,9 @@ import './notifications/services/notificationService.js';
 const app = express();
 
 // Middleware Configuration
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
 app.use(cors({
   origin: process.env.CLIENT_URL || 'https://sparknet-frontend-vercel.vercel.app',
   credentials: true,

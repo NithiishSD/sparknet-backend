@@ -21,8 +21,10 @@ const ACCOUNT_STATUS = {
   ACTIVE: 'active',
   SUSPENDED: 'suspended',
   BANNED: 'banned',
+  DELETED: 'deleted',
   PENDING_VERIFICATION: 'pending_verification',
   PENDING_GUARDIAN_APPROVAL: 'pending_guardian_approval',
+  PENDING_REVIEW: 'pending_review',
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -204,6 +206,14 @@ const userSchema = new mongoose.Schema(
     loginAttempts: { type: Number, default: 0 },
     lockUntil: { type: Date },
     sessions: [sessionSchema],
+
+    // ─── Registration Suspicion Scoring ─────────────────────────
+    suspicionFlags: [{ type: String }],
+    registrationIp: { type: String, default: null },
+
+    // ─── GDPR / COPPA Consent Tracking ─────────────────────────
+    consentGivenAt: { type: Date, default: null },
+    consentIp:      { type: String, default: null },
 
     // ─── Activity Tracking ─────────────────────────────────────
     lastLoginAt: { type: Date },

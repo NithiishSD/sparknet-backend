@@ -112,10 +112,46 @@ export const register = async (req, res) => {
       return res.status(409).json({ success: false, message: `${field} is already in use` });
     }
 
-    const initialStatus =
-      resolvedRole === ROLES.CHILD
-        ? ACCOUNT_STATUS.PENDING_GUARDIAN_APPROVAL
-        : ACCOUNT_STATUS.PENDING_VERIFICATION;
+    // ── Suspicion Scoring ──────────────────────────────────────────────────
+    const ip = getIp(req);
+    const suspicionFlags = [];
+
+    // Flag 1: Same IP registered > 3 accounts in last 60 minutes
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const sameIpCount = await User.countDocuments({
+      registrationIp: ip,
+      createdAt: { $gte: oneHourAgo },
+    });
+    if (sameIpCount > 3) {
+      suspicionFlags.push('sameIPLast1h');
+    }
+
+    // Flag 2: Disposable email domain
+    const DISPOSABLE_DOMAINS = ['mailinator', 'tempmail', 'guerrillamail', 'yopmail', 'throwaway'];
+    const emailDomain = email.split('@')[1]?.split('.')[0]?.toLowerCase();
+    if (DISPOSABLE_DOMAINS.includes(emailDomain)) {
+      suspicionFlags.push('disposableEmail');
+    }
+
+    // Flag 3: Bot-like username pattern (e.g. "john4829")
+    if (/^[a-z]+\d{4,}$/.test(username)) {
+      suspicionFlags.push('usernamePattern');
+    }
+
+    // Compute initial trust score: base 80, -15 per flag, min 20
+    const trustScore = Math.max(20, 80 - suspicionFlags.length * 15);
+
+    // If trust is low, override status to pending_review
+    const isSuspicious = trustScore < 40;
+    let initialStatus;
+    if (isSuspicious) {
+      initialStatus = ACCOUNT_STATUS.PENDING_REVIEW;
+    } else if (resolvedRole === ROLES.CHILD) {
+      initialStatus = ACCOUNT_STATUS.PENDING_GUARDIAN_APPROVAL;
+    } else {
+      initialStatus = ACCOUNT_STATUS.PENDING_VERIFICATION;
+    }
+    // ── End Suspicion Scoring ──────────────────────────────────────────────
 
     const user = await User.create({
       username,
@@ -125,14 +161,30 @@ export const register = async (req, res) => {
       role: resolvedRole,
       mode: resolvedMode,
       status: initialStatus,
+      trustScore,
+      suspicionFlags,
+      registrationIp: ip,
       termsAcceptedAt: new Date(),
       privacyAcceptedAt: new Date(),
     });
 
     try{
-    //Email verification token
-     const verifyToken = user.generateEmailVerificationToken()
-      //console.log(`Generated verification token for ${email}: ${verifyToken}`); // Log the token for testing
+    // Auto-create blank Profile and PrivacySettings doc
+    await Profile.create({ user: user._id, displayName: user.username });
+    await PrivacySettings.create({ user: user._id });
+
+    // Skip verification email for suspicious accounts
+    if (isSuspicious) {
+      console.warn(`[register] Suspicious account flagged: ${username} (IP: ${ip}, flags: ${suspicionFlags.join(', ')}, trust: ${trustScore})`);
+      return res.status(201).json({
+        success: true,
+        message: 'Account under review',
+        role: resolvedRole,
+      });
+    }
+
+    // Normal flow — send verification / guardian invite emails
+    const verifyToken = user.generateEmailVerificationToken();
     if (resolvedRole === ROLES.CHILD) {
       const inviteToken = user.generateGuardianInviteToken(guardianEmail);
       await user.save({ validateBeforeSave: false });
@@ -143,10 +195,6 @@ export const register = async (req, res) => {
     user.emailVerificationToken = verifyToken;
     user.emailVerificationExpires = Date.now() + 24 * 60 * 60 * 1000;
     await sendVerificationEmail(email, verifyToken);
-    
-    // Auto-create blank Profile and PrivacySettings doc
-    await Profile.create({ user: user._id, displayName: user.username });
-    await PrivacySettings.create({ user: user._id });
     
     res.status(201).json({
       success: true,
@@ -212,6 +260,9 @@ export const login = async (req, res) => {
     }
     if (user.status === ACCOUNT_STATUS.PENDING_GUARDIAN_APPROVAL) {
       return res.status(403).json({ success: false, message: 'Account awaiting guardian approval', code: 'PENDING_GUARDIAN_APPROVAL' });
+    }
+    if (user.status === ACCOUNT_STATUS.PENDING_REVIEW) {
+      return res.status(403).json({ success: false, message: 'Account is under review', code: 'PENDING_REVIEW' });
     }
 
     user.loginAttempts+=1;
@@ -408,8 +459,14 @@ export const getMe = async (req, res) => {
   const user = req.user;
   const isGuardian = user.role === ROLES.USER && (user.childLinks?.length || 0) > 0;
 
+  let token = req.cookies?.accessToken;
+  if (!token && req.headers.authorization?.startsWith('Bearer ')) {
+    token = req.headers.authorization.split(' ')[1];
+  }
+
   res.json({
     success: true,
+    accessToken: token, // Pass back to allow frontend socket hydration
     user: {
       id: user._id,
       username: user.username,

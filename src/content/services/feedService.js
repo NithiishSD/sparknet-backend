@@ -15,6 +15,7 @@
 
 import Post from '../../models/Post.js';
 import { rankContentFeed } from '../../ai/services/rankingEngine.js';
+import { getBlockedUserIds } from '../../utils/blockUtils.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
@@ -84,12 +85,15 @@ export const buildFeed = async ({
     query.risk_score = { $lt: threshold };
   }
 
+  // Resolve user IDs that are in a block relationship with the viewer
+  const blockedIds = await getBlockedUserIds(userId);
+
   // ── Step 2: Fetch candidate posts from DB ─────────────────────────────────
   // We fetch 3× the page size as candidates to allow re-ranking.
   // After scoring, we slice to the requested page + limit.
   const candidateLimit = limit * 3;
 
-  const rawPosts = await Post.find(query)
+  const rawPosts = await Post.find({ ...query, user: { $nin: blockedIds } })
     .populate('user', 'username oauthAvatarUrl role trustScore')
     .sort({ createdAt: -1 })       // pre-sort by recency as baseline
     .skip(skip)
@@ -104,8 +108,8 @@ export const buildFeed = async ({
   // ── Step 5: Slice to requested page ───────────────────────────────────────
   const pagePosts = scoredPosts.slice(0, limit);
 
-  // ── Step 6: Count total for pagination metadata ───────────────────────────
-  const total = await Post.countDocuments(query);
+  // Also exclude blocked users from the count so pagination is correct
+  const total = await Post.countDocuments({ ...query, user: { $nin: blockedIds } });
 
   return {
     posts: pagePosts,
@@ -148,6 +152,17 @@ export const getUserPostsFeed = async ({
     visibilityFilter = { $in: ['public', 'followers', 'private'] }; // see all own posts
   } else {
     visibilityFilter = 'public'; // strangers only see public
+  }
+
+  // Exclude posts from users in a block relationship with the viewer
+  let blockedIds = [];
+  if (viewerUserId) {
+    blockedIds = await getBlockedUserIds(viewerUserId);
+  }
+
+  // If viewer is blocked by (or has blocked) the profile owner, deny access
+  if (blockedIds.some(id => id.toString() === targetUserId.toString())) {
+    return { posts: [], pagination: { page, limit, total: 0, totalPages: 0, hasNextPage: false, hasPrevPage: false } };
   }
 
   const query = {

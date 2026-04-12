@@ -48,7 +48,7 @@ export const initSockets = (httpServer) => {
 
   // On successful authentication & connection
   io.on('connection', (socket) => {
-    const userId = socket.user.id;
+    const userId = socket.user.userId;
     console.log(`🔌 Client connected [User: ${userId}]`);
 
     // Map user to this socket instance for targeted broadcasts

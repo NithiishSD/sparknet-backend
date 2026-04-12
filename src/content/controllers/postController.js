@@ -9,6 +9,7 @@
  *   GET    /api/v1/posts/feed            → getFeed
  *   GET    /api/v1/posts/:id             → getSinglePost
  *   PUT    /api/v1/posts/:id             → editPost
+ *   PATCH  /api/v1/posts/:id             → patchPost
  *   DELETE /api/v1/posts/:id             → deletePost
  *   GET    /api/v1/posts/user/:userId    → getUserPosts
  */
@@ -242,6 +243,80 @@ export const editPost = async (req, res) => {
     return res.status(200).json({ success: true, post });
   } catch (error) {
     console.error('[editPost]', error);
+    return res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PATCH POST  (author-only edit: content_text + tags, re-runs safety engine)
+// PATCH /api/v1/posts/:id
+// ─────────────────────────────────────────────────────────────────────────────
+export const patchPost = async (req, res) => {
+  try {
+    const post = await Post.findById(req.params.id);
+
+    if (!post) {
+      return res.status(404).json({ success: false, message: 'Post not found' });
+    }
+
+    // ── 1. Author-only guard (no admin bypass — admins use PUT editPost) ──
+    const isAuthor = post.user.toString() === req.user._id.toString();
+    if (!isAuthor) {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: only the post author can edit this post',
+      });
+    }
+
+    // ── 2. Extract only permitted fields (mediaUrl changes are blocked) ──
+    const { content_text: incoming_text, content: fallback_text, tags } = req.body;
+    const newText = (incoming_text ?? fallback_text)?.trim();
+
+    if (newText === undefined && tags === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: 'Nothing to update — provide content_text and/or tags',
+      });
+    }
+
+    // ── 3. Re-run safety engine on updated (or existing) content ─────────
+    const textToClassify = newText ?? post.content_text;
+    const moderation = await analyzeContent(textToClassify);
+
+    // Block violating edits before persisting
+    const youthBlock = req.user.role === 'child' && moderation.riskScore >= 0.5;
+    if (moderation.riskScore >= 0.8 || youthBlock) {
+      return res.status(403).json({
+        success: false,
+        message: 'Edit blocked: updated content violates safety guidelines.',
+        code: 'EDIT_CONTENT_VIOLATION',
+      });
+    }
+
+    // ── 4. Apply permitted changes ────────────────────────────────────────
+    if (newText !== undefined) post.content_text = newText;
+    if (tags    !== undefined) post.tags         = Array.isArray(tags) ? tags : [];
+
+    // Sync all safety fields from engine result
+    post.risk_score   = moderation.riskScore;
+    post.safety_score = moderation.safetyScore  ?? moderation.riskScore;
+    post.safety_label = moderation.safetyLabel  ?? (moderation.isFlagged ? 'RISKY' : 'SAFE');
+    post.is_flagged   = moderation.isFlagged;
+    post.editedAt     = new Date();
+
+    await post.save();
+    await post.populate('user', 'username oauthAvatarUrl role');
+
+    return res.status(200).json({
+      success: true,
+      message: post.is_flagged
+        ? 'Post updated and queued for moderation review'
+        : 'Post updated successfully',
+      post,
+    });
+
+  } catch (error) {
+    console.error('[patchPost]', error);
     return res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 };

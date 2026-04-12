@@ -161,18 +161,19 @@ export const handleOAuthCallback = async (req, res) => {
         maxAge: 7 * 24 * 60 * 60 * 1000,
       });
 
-    // Redirect to appropriate frontend page
+    // Redirect to appropriate frontend page.
+    // NOTE: Do NOT put the JWT token in the URL query string.
+    // The httpOnly cookies above are already set on this response and will
+    // be sent to the browser with the redirect. The frontend reads auth state
+    // by calling GET /api/auth/me after landing — never by parsing ?token= from the URL.
+    // Putting tokens in URLs leaks them via: Referer headers, browser history, server logs.
     if (user.needsOnboarding) {
       // New OAuth user — send to onboarding (collect DOB, accept terms)
-      return res.redirect(
-        `${process.env.CLIENT_URL}/onboarding?token=${accessToken}`
-      );
+      return res.redirect(`${process.env.CLIENT_URL}/onboarding`);
     }
 
     // Returning user — send to dashboard/home
-    return res.redirect(
-      `${process.env.CLIENT_URL}/login?token=${accessToken}`
-    );
+    return res.redirect(`${process.env.CLIENT_URL}/feed`);
 
   } catch (err) {
     console.error('OAuth callback error:', err);
