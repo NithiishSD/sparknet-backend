@@ -26,13 +26,25 @@ export const followUser = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Already requested or following' });
     }
 
-    // Strict Connections logic for youth: If either user is a child, it might require 'pending' logic.
-    // For simplicity, we set it to accepted immediately for this demo, 
-    // unless we implement the exact friend request flow later.
-    const isStrict = req.user.role === 'child' || targetUser.role === 'child';
-    const initialStatus = isStrict ? 'accepted' : 'accepted'; // Mocking auto-accept but highlighting where 'pending' logic goes
+    // Strict Connections logic for youth
+    const isAdultFollowingChild = req.user.role !== 'child' && targetUser.role === 'child';
+    
+    if (isAdultFollowingChild && targetUser.guardianId) {
+      await Connection.create({ follower: followerId, following: targetId, status: 'pending' });
+      
+      // Notify the child's guardian
+      const { sendFollowRequestToGuardian } = await import('../../notifications/services/notificationService.js');
+      await sendFollowRequestToGuardian(targetUser.guardianId, req.user, targetUser);
+      
+      return res.status(200).json({ success: true, message: 'Request sent to guardian' });
+    }
 
+    const initialStatus = 'accepted';
     await Connection.create({ follower: followerId, following: targetId, status: initialStatus });
+
+    // Notify the target user of the new follow
+    const { default: appEvents, EVENTS } = await import('../../events/eventEmitter.js');
+    appEvents.emit(EVENTS.USER_FOLLOWED, { user: targetId, sender: followerId, senderName: req.user.username });
 
     res.status(200).json({ success: true, message: `Successfully followed ${targetUser.username}` });
   } catch (error) {
@@ -66,6 +78,22 @@ export const getFollowers = async (req, res) => {
       .populate('follower', 'username oauthAvatarUrl role');
     
     res.status(200).json({ success: true, followers: connections.map(c => c.follower) });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/users/connection-statuses
+// Returns an object mapping userId -> status ('accepted', 'pending')
+// Used to cleanly format Follow buttons on the Feed
+// ─────────────────────────────────────────────────────────────────────────────
+export const getConnectionStatuses = async (req, res) => {
+  try {
+    const connections = await Connection.find({ follower: req.user._id });
+    const statuses = {};
+    connections.forEach(c => { statuses[c.following.toString()] = c.status; });
+    res.status(200).json({ success: true, statuses });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error' });
   }

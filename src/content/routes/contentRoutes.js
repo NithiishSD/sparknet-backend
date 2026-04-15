@@ -19,6 +19,8 @@ import {
   deletePost,
   getSinglePost,
   getUserPosts,
+  getTrendingPosts,
+  getFollowingFeed,
 } from '../controllers/postController.js';
 
 import {
@@ -59,6 +61,8 @@ const guardContent = enforceChildControls('content');
 // POST MANAGEMENT
 router.post  ('/create', protect, guardContent, uploadPostMedia.single('media'), createPost);           // Create a post
 router.get   ('/feed',   protect, guardContent, getFeed);              // Get ranked feed
+router.get   ('/trending', protect, guardContent, getTrendingPosts);   // Get trending feed
+router.get   ('/following-feed', protect, guardContent, getFollowingFeed); // Get following feed
 
 // INTERACTION — static write
 router.post  ('/react',   protect, guardContent, likePost);            // Like a post

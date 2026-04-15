@@ -111,3 +111,33 @@ appEvents.on(EVENTS.USER_UNLIKED_POST, async (payload) => {
     console.error('[NotificationService Cleanup Error]', error);
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EXPORTED NOTIFICATION UTILS
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const sendFollowRequestToGuardian = async (guardianId, adultUser, childUser) => {
+  await processAndPush({
+    user: guardianId,
+    sender: adultUser._id,
+    type: 'system',
+    content: `${adultUser.username} is requesting to follow your child ${childUser.username}.`,
+    referenceId: childUser._id,
+    referenceModel: 'User'
+  });
+};
+
+export const sendFollowDecisionToAdult = async (adultId, childUser, isApproved) => {
+  const content = isApproved 
+    ? `Your request to follow ${childUser.username} was approved.`
+    : `Your request to follow ${childUser.username} was declined by their guardian.`;
+  
+  await processAndPush({
+    user: adultId,
+    sender: null,
+    type: 'system',
+    content,
+    referenceId: childUser._id,
+    referenceModel: 'User'
+  });
+};

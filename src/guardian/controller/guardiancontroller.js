@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import User from '../../models/User.js';
+import Connection from '../../models/Connection.js';
 import { sendGuardianInviteEmail, sendAccountStatusEmail } from '../../utils/Email.js';
 
 const { ROLES, ACCOUNT_STATUS } = User;
@@ -327,6 +328,91 @@ export const resendGuardianInvite = async (req, res) => {
     await sendGuardianInviteEmail(guardianEmail, child.username, inviteToken);
 
     res.json({ success: true, message: 'Guardian invite resent' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// @desc    Get pending follow requests for a child
+// @route   GET /api/guardian/children/:childId/follow-requests
+// @access  Private (requires guardian capability)
+// ─────────────────────────────────────────────────────────────
+export const getPendingFollowRequests = async (req, res) => {
+  try {
+    const guardian = await User.findById(req.user._id);
+    const isLinked = guardian.childLinks.some(cl => cl.childId.toString() === req.params.childId);
+    if (!isLinked) return res.status(403).json({ success: false, message: 'Not authorized' });
+
+    const requests = await Connection.find({
+      following: req.params.childId,
+      status: 'pending'
+    }).populate('follower', 'username oauthAvatarUrl role');
+
+    res.json({ success: true, count: requests.length, requests });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// @desc    Approve a pending follow request
+// @route   PATCH /api/guardian/children/:childId/follow-requests/:requestId/approve
+// @access  Private (requires guardian capability)
+// ─────────────────────────────────────────────────────────────
+export const approveFollowRequest = async (req, res) => {
+  try {
+    const guardian = await User.findById(req.user._id);
+    const childId = req.params.childId;
+    const isLinked = guardian.childLinks.some(cl => cl.childId.toString() === childId);
+    if (!isLinked) return res.status(403).json({ success: false, message: 'Not authorized' });
+
+    const connection = await Connection.findOne({
+      _id: req.params.requestId,
+      following: childId,
+      status: 'pending'
+    }).populate('follower following');
+
+    if (!connection) return res.status(404).json({ success: false, message: 'Request not found' });
+
+    connection.status = 'accepted';
+    await connection.save();
+
+    // Notify adult
+    const { sendFollowDecisionToAdult } = await import('../../notifications/services/notificationService.js');
+    await sendFollowDecisionToAdult(connection.follower._id, connection.following, true);
+
+    res.json({ success: true, message: 'Request approved' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// @desc    Decline a pending follow request
+// @route   PATCH /api/guardian/children/:childId/follow-requests/:requestId/decline
+// @access  Private (requires guardian capability)
+// ─────────────────────────────────────────────────────────────
+export const declineFollowRequest = async (req, res) => {
+  try {
+    const guardian = await User.findById(req.user._id);
+    const childId = req.params.childId;
+    const isLinked = guardian.childLinks.some(cl => cl.childId.toString() === childId);
+    if (!isLinked) return res.status(403).json({ success: false, message: 'Not authorized' });
+
+    const connection = await Connection.findOneAndDelete({
+      _id: req.params.requestId,
+      following: childId,
+      status: 'pending'
+    }).populate('follower following');
+
+    if (!connection) return res.status(404).json({ success: false, message: 'Request not found' });
+
+    // Notify adult
+    const { sendFollowDecisionToAdult } = await import('../../notifications/services/notificationService.js');
+    await sendFollowDecisionToAdult(connection.follower._id, connection.following, false);
+
+    res.json({ success: true, message: 'Request declined' });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });
   }

@@ -372,3 +372,121 @@ export const getUserPosts = async (req, res) => {
     return res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET TRENDING POSTS  (sorted by likes in last 7 days)
+// GET /api/v1/posts/trending?page=1&limit=20
+// ─────────────────────────────────────────────────────────────────────────────
+export const getTrendingPosts = async (req, res) => {
+  try {
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(50, parseInt(req.query.limit) || 20);
+    const skip  = (page - 1) * limit;
+
+    const { getBlockedUserIds } = await import('../../utils/blockUtils.js');
+    const blockedIds = await getBlockedUserIds(req.user._id.toString());
+    const excludedIds = [...blockedIds, req.user._id];
+
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const query = {
+      visibility: 'public',
+      is_flagged: false,
+      createdAt: { $gte: sevenDaysAgo },
+      user: { $nin: excludedIds },
+    };
+
+    if (req.user.role === 'child') {
+      query.risk_score = { $lt: 0.3 };
+    }
+
+    const total = await Post.countDocuments(query);
+    const posts = await Post.find(query)
+      .populate('user', 'username oauthAvatarUrl role trustScore')
+      .sort({ likesCount: -1, commentsCount: -1, createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    // Attach computed authorName
+    const enriched = posts.map(p => ({
+      ...p,
+      authorName: p.user?.username || 'Unknown',
+      likesCount: p.likesCount ?? p.likes?.length ?? 0,
+      commentsCount: p.commentsCount ?? p.comments?.length ?? 0,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      posts: enriched,
+      pagination: { total, page, pages: Math.ceil(total / limit), limit },
+    });
+  } catch (error) {
+    console.error('[getTrendingPosts]', error);
+    return res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET FOLLOWING FEED  (posts from users you follow)
+// GET /api/v1/posts/following-feed?page=1&limit=20
+// ─────────────────────────────────────────────────────────────────────────────
+export const getFollowingFeed = async (req, res) => {
+  try {
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(50, parseInt(req.query.limit) || 20);
+    const skip  = (page - 1) * limit;
+
+    // Dynamically import Connection model to get followed user IDs
+    const Connection = (await import('../../models/Connection.js')).default;
+    const connections = await Connection.find({
+      follower: req.user._id,
+      status: 'accepted',
+    }).select('following').lean();
+
+    const followedIds = connections.map(c => c.following);
+
+    if (followedIds.length === 0) {
+      return res.status(200).json({
+        success: true,
+        posts: [],
+        pagination: { total: 0, page, pages: 0, limit },
+      });
+    }
+
+    const query = {
+      user: { $in: followedIds },
+      is_flagged: false,
+    };
+    if (req.user.role === 'child') {
+      query.risk_score = { $lt: 0.3 };
+    } else {
+      // Non-child viewers see public + followers posts from people they follow
+      query.$or = [{ visibility: 'public' }, { visibility: 'followers' }];
+    }
+
+    const total = await Post.countDocuments(query);
+    const posts = await Post.find(query)
+      .populate('user', 'username oauthAvatarUrl role trustScore')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const enriched = posts.map(p => ({
+      ...p,
+      authorName: p.user?.username || 'Unknown',
+      likesCount: p.likesCount ?? p.likes?.length ?? 0,
+      commentsCount: p.commentsCount ?? p.comments?.length ?? 0,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      posts: enriched,
+      pagination: { total, page, pages: Math.ceil(total / limit), limit },
+    });
+  } catch (error) {
+    console.error('[getFollowingFeed]', error);
+    return res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+};

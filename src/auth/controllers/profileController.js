@@ -109,7 +109,7 @@ export const searchUsers = async (req, res) => {
     }
 
     const regex = new RegExp(query, 'i');
-    const users = await User.find({ username: regex })
+    const users = await User.find({ username: regex, role: { $ne: 'admin' } })
       .select('username oauthAvatarUrl role status')
       .limit(20)
       .lean();

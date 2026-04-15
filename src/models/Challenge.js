@@ -6,7 +6,20 @@ const challengeSchema = new mongoose.Schema({
   points: { type: Number, default: 0 },
   icon: { type: String, default: '🏆' },
   category: { type: String, enum: ['creative', 'knowledge', 'coding', 'wellness', 'community'] },
-  durationDays: { type: Number, default: 7 },
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
+  visibility: {
+    type: String,
+    enum: ['global', 'family'],
+    default: 'global'
+  },
+  durationDays: {
+    type: Number,
+    default: 7
+  },
 
   // ── Participants with AI scoring + vote scoring ───────────────────────
   participants: [{

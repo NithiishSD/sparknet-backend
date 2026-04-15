@@ -8,6 +8,9 @@ import {
   unlinkChild,
   getChildActivity,
   resendGuardianInvite,
+  getPendingFollowRequests,
+  approveFollowRequest,
+  declineFollowRequest,
 } from '../controller/guardiancontroller.js';
 import { protect, requireGuardianCapability, requireEmailVerified } from '../../middleware/Auth.js';
 
@@ -23,5 +26,10 @@ router.patch('/children/:childId/controls', updateChildControls);
 router.patch('/children/:childId/status', setChildStatus);
 router.delete('/children/:childId', unlinkChild);
 router.get('/children/:childId/activity', getChildActivity);
+
+// ── Follow Moderation (Adult to Child) ────────────────────────────────────
+router.get('/children/:childId/follow-requests', getPendingFollowRequests);
+router.patch('/children/:childId/follow-requests/:requestId/approve', approveFollowRequest);
+router.patch('/children/:childId/follow-requests/:requestId/decline', declineFollowRequest);
 
 export default router;

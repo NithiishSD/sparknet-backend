@@ -87,13 +87,14 @@ export const buildFeed = async ({
 
   // Resolve user IDs that are in a block relationship with the viewer
   const blockedIds = await getBlockedUserIds(userId);
+  const excludedUserIds = [...blockedIds, userId];
 
   // ── Step 2: Fetch candidate posts from DB ─────────────────────────────────
   // We fetch 3× the page size as candidates to allow re-ranking.
   // After scoring, we slice to the requested page + limit.
   const candidateLimit = limit * 3;
 
-  const rawPosts = await Post.find({ ...query, user: { $nin: blockedIds } })
+  const rawPosts = await Post.find({ ...query, user: { $nin: excludedUserIds } })
     .populate('user', 'username oauthAvatarUrl role trustScore')
     .sort({ createdAt: -1 })       // pre-sort by recency as baseline
     .skip(skip)
@@ -108,8 +109,8 @@ export const buildFeed = async ({
   // ── Step 5: Slice to requested page ───────────────────────────────────────
   const pagePosts = scoredPosts.slice(0, limit);
 
-  // Also exclude blocked users from the count so pagination is correct
-  const total = await Post.countDocuments({ ...query, user: { $nin: blockedIds } });
+  // Also exclude blocked users and current user from the count so pagination is correct
+  const total = await Post.countDocuments({ ...query, user: { $nin: excludedUserIds } });
 
   return {
     posts: pagePosts,

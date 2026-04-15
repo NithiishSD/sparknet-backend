@@ -35,12 +35,54 @@ const rebuildLeaderboard = (challenge) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/', async (req, res) => {
   try {
-    const challenges = await Challenge.find()
+    const user = req.user;
+    const query = { $or: [{ visibility: 'global' }, { visibility: { $exists: false } }] };
+    
+    if (user.role === 'child' && user.guardianId) {
+      query.$or.push({ createdBy: user.guardianId, visibility: 'family' });
+    } else {
+      query.$or.push({ createdBy: user._id, visibility: 'family' });
+    }
+
+    const challenges = await Challenge.find(query)
       .populate('participants.userId', 'username oauthAvatarUrl')
       .lean();
     return res.json({ success: true, count: challenges.length, data: challenges });
   } catch (error) {
     console.error('[listChallenges]', error);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CREATE CHALLENGE
+// POST /api/challenges/
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/', async (req, res) => {
+  try {
+    if (req.user.role === 'child') {
+      return res.status(403).json({ success: false, message: 'Children cannot create challenges' });
+    }
+
+    const { title, description, points, category, durationDays, visibility } = req.body;
+    
+    if (!title || !description) {
+      return res.status(400).json({ success: false, message: 'Title and description are required' });
+    }
+
+    const newChallenge = await Challenge.create({
+      title,
+      description,
+      points: points || 100,
+      category: category || 'creative',
+      durationDays: durationDays || 7,
+      visibility: visibility || 'global',
+      createdBy: req.user._id
+    });
+
+    return res.status(201).json({ success: true, data: newChallenge });
+  } catch (error) {
+    console.error('[createChallenge]', error);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 });

@@ -16,6 +16,8 @@ export const EVENTS = {
   COMMENT_DELETED:    'comment_deleted',
   MESSAGE_RECEIVED:   'message_received',
   GUARDIAN_ALERT:     'guardian_alert',   // fired when a child violates a guardian rule
+  USER_FOLLOWED:      'user_followed',
+  FOLLOW_REQUEST_APPROVED: 'follow_request_approved',
 };
 
 export default appEvents;
