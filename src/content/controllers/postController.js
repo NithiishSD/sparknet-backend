@@ -18,6 +18,7 @@ import Post from '../../models/Post.js';
 import User from '../../models/User.js';
 import { applyTrustPenalty } from '../../moderation/services/moderationService.js';
 import { classifyContentSafety as analyzeContent } from '../../ai/services/safetyEngine.js';
+import { generateEmbedding } from '../../ai/services/geminiService.js';
 import { buildFeed, getUserPostsFeed } from '../services/feedService.js';
 import ActivityLog, { ACTIVITY_TYPES } from '../../models/ActivityLog.js';
 
@@ -85,7 +86,13 @@ export const createPost = async (req, res) => {
       finalVisibility = 'public';
     }
 
-    // ── 5. Create & save post ──────────────────────────────────────────────
+    const moderation_remark = moderation.remark || null;
+    
+    // ── 4. Generate Semantic Embedding ───────────
+    // This allows the "AI" to understand the meaning of the post.
+    const embedding = await generateEmbedding(content_text.trim());
+    
+    // ── 5. Create & save post ──────────────────────
     const newPost = await Post.create({
       user: userId,
       content_text: content_text.trim(),
@@ -94,7 +101,8 @@ export const createPost = async (req, res) => {
       visibility:   finalVisibility,
       risk_score,
       is_flagged,
-      moderation_remark: moderation.remark || null,
+      moderation_remark,
+      embedding:    embedding || [],
     });
 
     // Populate user for response
@@ -303,6 +311,12 @@ export const patchPost = async (req, res) => {
     post.safety_label = moderation.safetyLabel  ?? (moderation.isFlagged ? 'RISKY' : 'SAFE');
     post.is_flagged   = moderation.isFlagged;
     post.editedAt     = new Date();
+
+    // Re-generate embedding on content change
+    if (newText !== undefined) {
+      const embedding = await generateEmbedding(newText);
+      if (embedding) post.embedding = embedding;
+    }
 
     await post.save();
     await post.populate('user', 'username oauthAvatarUrl role');

@@ -19,9 +19,9 @@ const WEIGHTS = {
 const RECENCY_HALF_LIFE = 24.0;
 
 /**
- * Computes cosine-like interest similarity
+ * Computes cosine-like interest similarity based on tags
  */
-const computeInterestSimilarity = (postTags, userWeights) => {
+const computeTagSimilarity = (postTags, userWeights) => {
   if (!postTags || postTags.length === 0 || !userWeights || Object.keys(userWeights).length === 0) {
     return 0;
   }
@@ -32,8 +32,26 @@ const computeInterestSimilarity = (postTags, userWeights) => {
       score += userWeights[lowerTag];
     }
   });
-  // Cap at 1.0
   return Math.min(score, 1.0);
+};
+
+/**
+ * Computes exact Cosine Similarity between two vectors
+ */
+const cosineSimilarity = (vecA, vecB) => {
+  if (!vecA || !vecB || vecA.length !== vecB.length || vecA.length === 0) return 0;
+  let dotProduct = 0;
+  let mA = 0;
+  let mB = 0;
+  for (let i = 0; i < vecA.length; i++) {
+    dotProduct += vecA[i] * vecB[i];
+    mA += vecA[i] * vecA[i];
+    mB += vecB[i] * vecB[i];
+  }
+  mA = Math.sqrt(mA);
+  mB = Math.sqrt(mB);
+  if (mA === 0 || mB === 0) return 0;
+  return dotProduct / (mA * mB);
 };
 
 /**
@@ -51,7 +69,11 @@ export const rankContentFeed = async (posts, viewerId) => {
   }
   
   const interestWeights = userProfile?.interestWeights || {};
-  const isColdStart = Object.keys(interestWeights).length === 0;
+  const userEmbedding   = userProfile?.interestEmbedding || [];
+  
+  const hasWeights = Object.keys(interestWeights).length > 0;
+  const hasEmbedding = userEmbedding.length > 0;
+  const isColdStart = !hasWeights && !hasEmbedding;
 
   // 2. Score each post
   const scoredPosts = posts.map(post => {
@@ -62,8 +84,21 @@ export const rankContentFeed = async (posts, viewerId) => {
     const ageHours = (Date.now() - new Date(post.createdAt).getTime()) / (1000 * 60 * 60);
     const recencyScore = Math.pow(0.5, ageHours / RECENCY_HALF_LIFE);
     
-    // C. Interest Similarity
-    const similarityScore = computeInterestSimilarity(post.tags, interestWeights);
+    // C. Interest Similarity (Hybrid: Tags + Semantic)
+    let similarityScore = 0;
+    
+    if (hasWeights) {
+      similarityScore += computeTagSimilarity(post.tags, interestWeights) * 0.4;
+    }
+    
+    if (hasEmbedding && post.embedding?.length > 0) {
+      // Semantic similarity adds a lot of depth
+      const semanticSim = cosineSimilarity(userEmbedding, post.embedding);
+      similarityScore += semanticSim * 0.6;
+    } else if (hasWeights) {
+      // Fallback: if no embeddings, boost tag-based similarity
+      similarityScore = computeTagSimilarity(post.tags, interestWeights);
+    }
     
     // D. Apply Weights (Dynamically adjust if Cold Start)
     let wE = WEIGHTS.ENGAGEMENT;

@@ -82,6 +82,31 @@ export const processActivityLogs = async (logs) => {
     });
     profile.set('interestWeights', currentInterests);
 
+    // ── 3. Update Semantic Interest Embedding ───────────
+    // Alpha controls how quickly the user's "taste" shifts.
+    const ALPHA = 0.1; 
+    
+    // Find all post embeddings from this batch's interactions
+    const postEmbeddings = logs
+      .filter(l => l.userId.toString() === userId && l.referenceModel === 'Post' && l.referenceId?.embedding?.length > 0)
+      .map(l => l.referenceId.embedding);
+
+    if (postEmbeddings.length > 0) {
+      let currentEmbedding = profile.interestEmbedding || [];
+      
+      for (const newVector of postEmbeddings) {
+        if (currentEmbedding.length === 0) {
+          currentEmbedding = [...newVector];
+          continue;
+        }
+        // Weighted Moving Average: (Old * (1-Alpha)) + (New * Alpha)
+        currentEmbedding = currentEmbedding.map((val, i) => 
+          (val * (1 - ALPHA)) + (newVector[i] * ALPHA)
+        );
+      }
+      profile.interestEmbedding = currentEmbedding;
+    }
+
     // Append discrete flags
     const currentFlags = new Set(profile.flags);
     batch.newFlags.forEach(f => currentFlags.add(f));

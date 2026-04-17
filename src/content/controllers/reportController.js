@@ -34,6 +34,11 @@ export const reportContent = async (req, res) => {
 
     await newReport.save();
 
+    // Increment reportCount on the target post if the report is for a post
+    if (type === 'post') {
+      await Post.findByIdAndUpdate(target_id, { $inc: { reportCount: 1 } });
+    }
+
     res.status(201).json({ success: true, message: "Content reported successfully" });
   } catch (error) {
     res.status(500).json({ message: "Server Error", error: error.message });

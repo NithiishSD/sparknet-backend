@@ -39,14 +39,14 @@ export const followUser = async (req, res) => {
       return res.status(200).json({ success: true, message: 'Request sent to guardian' });
     }
 
-    const initialStatus = 'accepted';
+    const initialStatus = 'pending';
     await Connection.create({ follower: followerId, following: targetId, status: initialStatus });
 
-    // Notify the target user of the new follow
+    // Notify the target user of the new follow request
     const { default: appEvents, EVENTS } = await import('../../events/eventEmitter.js');
     appEvents.emit(EVENTS.USER_FOLLOWED, { user: targetId, sender: followerId, senderName: req.user.username });
 
-    res.status(200).json({ success: true, message: `Successfully followed ${targetUser.username}` });
+    res.status(200).json({ success: true, message: `Follow request sent to ${targetUser.username} (pending approval)` });
   } catch (error) {
     console.error('[followUser]', error);
     res.status(500).json({ success: false, message: 'Server error' });

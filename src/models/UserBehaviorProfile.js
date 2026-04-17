@@ -44,6 +44,13 @@ const userBehaviorProfileSchema = new mongoose.Schema(
       type: String,
       trim: true,
     }],
+
+    // ── AI Semantic Profile ──────────────────────────────────────────────────
+    // Represents the user's "semantic taste" based on past interactions.
+    interestEmbedding: {
+      type: [Number],
+      default: [],
+    },
   },
   {
     timestamps: true,

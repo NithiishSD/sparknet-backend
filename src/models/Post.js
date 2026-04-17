@@ -33,6 +33,7 @@ const postSchema = new mongoose.Schema({
   likeCount:    { type: Number, default: 0, min: 0 },
   commentCount: { type: Number, default: 0, min: 0 },
   saveCount:    { type: Number, default: 0, min: 0 },
+  reportCount:  { type: Number, default: 0, min: 0 },
 
   // ── Safety & Moderation Fields ───────────────────────────────────────────
   is_flagged:        { type: Boolean, default: false },
@@ -41,6 +42,14 @@ const postSchema = new mongoose.Schema({
   safety_label:      { type: String,  default: 'SAFE' },
   moderation_remark: { type: String,  default: null },
   editedAt:          { type: Date,    default: null },
+
+  // ── AI Embedding (Semantic Vector) ───────────────────────────────────────
+  // 1536-dimensional vector from Google Gemini (text-embedding-004)
+  embedding: {
+    type: [Number],
+    default: [],
+    select: false // Avoid sending large vectors to frontend unless needed
+  },
 
 }, { timestamps: true });
 

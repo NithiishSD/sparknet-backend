@@ -1,9 +1,11 @@
 /**
- * AI Safety Engine [SparkNet AI Layer — Phase 8]
+ * AI Safety Engine [SparkNet AI Layer — Phase 8.1]
  * 
- * Maps raw inputs to standard AI metrics (safetyScore, safetyLabel).
- * Acts as an independent layer ready for external ML integrations.
+ * Maps raw inputs to standard AI metrics using Google Gemini API.
+ * Falls back to deterministic keyword matching if API is unavailable.
  */
+
+import { analyzeSafetyWithGemini } from './geminiService.js';
 
 // Simulated weights for classification models
 const TOXIC_PATTERNS = [
@@ -17,9 +19,14 @@ const TOXIC_PATTERNS = [
 ];
 
 export const classifyContentSafety = async (text) => {
-  // Simulate asynchronous API latency for a scalable ML inference model mapping
-  await new Promise(resolve => setTimeout(resolve, 50));
+  // 1. Try API-based High-Precision AI (Gemini)
+  const geminiResult = await analyzeSafetyWithGemini(text);
+  
+  if (geminiResult) {
+    return geminiResult;
+  }
 
+  // 2. Fallback to Deterministic Algorithm (Old Logic)
   if (!text) {
     return { safetyScore: 0, safetyLabel: 'SAFE', categories: [] };
   }

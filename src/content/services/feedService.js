@@ -96,6 +96,7 @@ export const buildFeed = async ({
 
   const rawPosts = await Post.find({ ...query, user: { $nin: excludedUserIds } })
     .populate('user', 'username oauthAvatarUrl role trustScore')
+    .select('+embedding')          // Required for AI ranking similarity
     .sort({ createdAt: -1 })       // pre-sort by recency as baseline
     .skip(skip)
     .limit(candidateLimit)
@@ -105,6 +106,10 @@ export const buildFeed = async ({
   // The rankContentFeed uses the UserBehaviorProfile for cosine similarity
   // and completely replaces the legacy loop math.
   const scoredPosts = await rankContentFeed(rawPosts, userId);
+
+  // ── Step 4: Cleanup Sensitive AI Data ─────────────────────────────────────
+  // We don't want to send 1536-dimensional vectors over the wire to the client.
+  scoredPosts.forEach(p => { delete p.embedding; });
 
   // ── Step 5: Slice to requested page ───────────────────────────────────────
   const pagePosts = scoredPosts.slice(0, limit);
