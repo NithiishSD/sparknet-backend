@@ -24,7 +24,7 @@ export const connectedUsers = new Map();
 export const initSockets = (httpServer) => {
   io = new Server(httpServer, {
     cors: {
-      origin: process.env.CLIENT_URL || 'http://localhost:3000',
+      origin: process.env.CLIENT_URL || 'https://sparknetapp.vercel.app',
       credentials: true
     }
   });
@@ -35,7 +35,7 @@ export const initSockets = (httpServer) => {
       // Typically the client passes token in an auth payload:
       // socket = io("ws://host", { auth: { token: "JWT..." } })
       const token = socket.handshake.auth.token;
-      
+
       if (!token) return next(new Error('Authentication Error: Missing Token'));
 
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
@@ -60,12 +60,12 @@ export const initSockets = (httpServer) => {
       // payload: { receiverId, content }
       try {
         const result = await processAndSaveMessage(userId, payload.receiverId, payload.content);
-        
+
         // Push strictly if it safely passed the moderation flagging boundaries
         if (!result.isFlagged) {
           const receiverSocket = connectedUsers.get(payload.receiverId.toString());
           if (receiverSocket) {
-             receiverSocket.emit('RECEIVE_MESSAGE', result.message);
+            receiverSocket.emit('RECEIVE_MESSAGE', result.message);
           }
 
           // Trigger standard DB Notification asynchronous write
@@ -77,10 +77,10 @@ export const initSockets = (httpServer) => {
             messageId: result.message._id
           });
         }
-        
+
         // Acknowledge back to sender that it was processed (and optionally flagged)
         if (callback) callback({ success: true, message: result.message, isFlagged: result.isFlagged });
-        
+
       } catch (error) {
         // Specifically bounce Youth Safety Blocks back to UI live
         if (callback) callback({ success: false, error: error.message });
@@ -91,14 +91,14 @@ export const initSockets = (httpServer) => {
       // payload: { conversationId, messageIds: [] }
       try {
         await Message.updateMany(
-          { 
-            conversationId: payload.conversationId, 
-            receiverId: userId, 
-            _id: { $in: payload.messageIds } 
+          {
+            conversationId: payload.conversationId,
+            receiverId: userId,
+            _id: { $in: payload.messageIds }
           },
           { isRead: true }
         );
-        
+
         // Let the sender know their messages were read (Read Receipts)
         // Extract the sender from one of the messages to bounce the event back
         const peek = await Message.findById(payload.messageIds[0]);
