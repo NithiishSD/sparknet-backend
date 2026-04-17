@@ -8,9 +8,9 @@ const postSchema = new mongoose.Schema({
   },
   content_text: {
     type: String,
-    required: [true, 'Post content cannot be empty'],
     trim: true,
-    maxlength: 2000
+    maxlength: 2000,
+    default: ''
   },
   media_url: {
     type: String,

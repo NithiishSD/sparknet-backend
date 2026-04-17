@@ -25,22 +25,22 @@ const avatarStorage = new CloudinaryStorage({
   },
 });
 
-// For Post Media (Images)
+// For Post Media (Images & Videos)
 const postStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
     folder: 'sparknet-posts',
-    allowed_formats: ['jpg', 'png', 'jpeg', 'webp', 'gif'],
-    transformation: [{ width: 1200, crop: 'limit' }], // Larger limit for posts
+    resource_type: 'auto',
+    allowed_formats: ['jpg', 'png', 'jpeg', 'webp', 'gif', 'mp4', 'webm'],
     public_id: (req, file) => `post-${req.user._id}-${Date.now()}`,
   },
 });
 
 const fileFilter = (req, file, cb) => {
-  if (file.mimetype.startsWith('image/')) {
+  if (file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/')) {
     cb(null, true);
   } else {
-    cb(new Error('Not an image! Please upload only images.'), false);
+    cb(new Error('Not supported! Please upload images or videos only.'), false);
   }
 };
 
@@ -53,5 +53,5 @@ export const uploadAvatar = multer({
 export const uploadPostMedia = multer({
   storage: postStorage,
   fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 } // 5MB for post images
+  limits: { fileSize: 50 * 1024 * 1024 } // 50MB for post media (images + video)
 });

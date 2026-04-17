@@ -12,7 +12,7 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
  * safety moderation and semantic analysis.
  */
 
-export const getGeminiProModel = () => genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+export const getGeminiProModel = () => genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 export const getGeminiEmbeddingModel = () => genAI.getGenerativeModel({ model: "text-embedding-004" });
 
 /**
@@ -20,7 +20,7 @@ export const getGeminiEmbeddingModel = () => genAI.getGenerativeModel({ model: "
  * This is significantly more powerful than keyword matching.
  */
 export const analyzeSafetyWithGemini = async (text) => {
-  if (!process.env.GEMINI_API_KEY ) {
+  if (!process.env.GEMINI_API_KEY) {
     console.warn('GEMINI_API_KEY not set. Falling back to basic safety check.');
     return null;
   }

@@ -31,8 +31,8 @@ const SAMPLE_POSTS = [
     tags: ['astronomy', 'tech', 'space'],
   },
   {
-    content_text: "Deep Sea Exploration: Found some incredible bioluminescent jellyfishes at 4000m depth. Life truly finds a way in the dark. 🌊✨",
-    media_url: "https://videos.pexels.com/video-files/4255153/4255153-uhd_2560_1440_25fps.mp4",
+    content_text: "Deep Sea Exploration: Found some incredible bioluminescent creatures at 4000m depth. Life truly finds a way in the dark. 🌊✨",
+    media_url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
     tags: ['nature', 'exploration', 'science'],
   },
   {
@@ -67,19 +67,15 @@ const seedDemo = async () => {
       console.log('👤 Demo user already exists.');
     }
 
-    // 2. Create Sample Posts
+    // 2. Always refresh sample posts (delete old ones first)
+    console.log('🗑️  Removing stale demo posts...');
+    await Post.deleteMany({ user: user._id });
+
     console.log('🖼️  Generating sample posts...');
     for (const postData of SAMPLE_POSTS) {
-      const existing = await Post.findOne({ user: user._id, content_text: postData.content_text });
-      if (!existing) {
-        await Post.create({
-          ...postData,
-          user: user._id,
-          visibility: 'public'
-        });
-        await ActivitySummary.findOneAndUpdate({ user: user._id }, { $inc: { postCount: 1 } });
-        console.log(`✅ Post created: ${postData.tags[0]}...`);
-      }
+      await Post.create({ ...postData, user: user._id, visibility: 'public' });
+      await ActivitySummary.findOneAndUpdate({ user: user._id }, { $inc: { postCount: 1 } });
+      console.log(`✅ Post created: ${postData.tags[0]}...`);
     }
 
     console.log('\n✨ Seeding successful! Log in or refresh your feed to see the new content.');

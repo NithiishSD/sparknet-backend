@@ -43,12 +43,12 @@ export const createPost = async (req, res) => {
     const userRole = req.user.role;
 
     // ── 1. Validate required fields ────────────────────────────────────────
-    if (!content_text?.trim()) {
-      return res.status(400).json({ success: false, message: 'Post content is required' });
+    if (!content_text?.trim() && !req.file && !media_url) {
+      return res.status(400).json({ success: false, message: 'Post content or media is required' });
     }
 
     // ── 2. Content Moderation pipeline ────────────────────────────────────
-    const moderation  = await analyzeContent(content_text);
+    const moderation  = await analyzeContent(content_text || '');
     const risk_score  = moderation.riskScore;
     const is_flagged  = moderation.isFlagged;
 
@@ -90,12 +90,14 @@ export const createPost = async (req, res) => {
     
     // ── 4. Generate Semantic Embedding ───────────
     // This allows the "AI" to understand the meaning of the post.
-    const embedding = await generateEmbedding(content_text.trim());
+    const embedding = typeof content_text === 'string' && content_text.trim() 
+      ? await generateEmbedding(content_text.trim()) 
+      : [];
     
     // ── 5. Create & save post ──────────────────────
     const newPost = await Post.create({
       user: userId,
-      content_text: content_text.trim(),
+      content_text: typeof content_text === 'string' ? content_text.trim() : '',
       media_url:    media_url || null,
       tags:         Array.isArray(tags) ? tags : [],
       visibility:   finalVisibility,

@@ -50,8 +50,10 @@ export const classifyContentSafety = async (text) => {
 
   return {
     safetyScore,
+    riskScore: safetyScore,          // alias — postController reads this
     safetyLabel,
     categories: Array.from(categories),
-    isFlagged: safetyScore >= 0.5 
+    isFlagged: safetyScore >= 0.5,
+    remark: null,
   };
 };

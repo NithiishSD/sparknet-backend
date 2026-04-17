@@ -35,7 +35,7 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'https://sparknet-frontend-vercel.vercel.app',
+  origin: process.env.CLIENT_URL || 'https://sparknetapp.vercel.app',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
 }));

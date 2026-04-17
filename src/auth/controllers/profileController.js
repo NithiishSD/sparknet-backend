@@ -30,7 +30,9 @@ export const updateProfile = async (req, res) => {
   try {
     const updates = req.body;
     if (req.file) {
-      updates.avatar = `/uploads/avatars/${req.file.filename}`;
+      updates.avatar = req.file.path;
+      // Also update the User model so the feed correctly displays the new avatar
+      await User.findByIdAndUpdate(req.user._id, { oauthAvatarUrl: req.file.path });
     }
 
     const profile = await Profile.findOneAndUpdate(
