@@ -1,17 +1,22 @@
 /**
- * Challenge Routes  [SparkNet Challenges — AI Judging + Peer Voting]
+ * Challenge Routes  [SparkNet Challenges — AI Judging + Peer Voting + Lifecycle]
  *
  * Routes:
  *   GET    /api/challenges/                → list all challenges
- *   POST   /api/challenges/join            → join a challenge
- *   POST   /api/challenges/:id/submit      → submit entry + AI scoring
- *   POST   /api/challenges/:id/vote        → peer vote for a candidate
- *   GET    /api/challenges/:id/leaderboard → get challenge leaderboard
+ *   POST   /api/challenges/               → create a new challenge
+ *   POST   /api/challenges/join           → join a challenge
+ *   POST   /api/challenges/:id/submit     → submit entry + AI scoring
+ *   POST   /api/challenges/:id/vote       → peer vote for a candidate
+ *   GET    /api/challenges/:id/leaderboard→ get challenge leaderboard
+ *   GET    /api/challenges/:id            → get single challenge
+ *   PATCH  /api/challenges/:id/close      → complete challenge (creator OR admin)
+ *   PATCH  /api/challenges/:id/terminate  → force-terminate challenge (admin only)
  */
 
 import express from 'express';
 import { protect } from '../../middleware/Auth.js';
 import Challenge from '../../models/Challenge.js';
+import User from '../../models/User.js';
 import { classifyContentSafety } from '../../ai/services/safetyEngine.js';
 
 const router = express.Router();
@@ -29,6 +34,13 @@ const rebuildLeaderboard = (challenge) => {
     .sort((a, b) => b.score - a.score);
 };
 
+// ── Helper: check if user is creator or admin ───────────────────────────────
+const isCreatorOrAdmin = (challenge, user) => {
+  const isAdmin   = user.role === 'admin';
+  const isCreator = challenge.createdBy && challenge.createdBy.toString() === user._id.toString();
+  return isAdmin || isCreator;
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // LIST CHALLENGES
 // GET /api/challenges/
@@ -37,7 +49,7 @@ router.get('/', async (req, res) => {
   try {
     const user = req.user;
     const query = { $or: [{ visibility: 'global' }, { visibility: { $exists: false } }] };
-    
+
     if (user.role === 'child' && user.guardianId) {
       query.$or.push({ createdBy: user.guardianId, visibility: 'family' });
     } else {
@@ -46,6 +58,7 @@ router.get('/', async (req, res) => {
 
     const challenges = await Challenge.find(query)
       .populate('participants.userId', 'username oauthAvatarUrl')
+      .populate('winner', 'username oauthAvatarUrl')
       .lean();
     return res.json({ success: true, count: challenges.length, data: challenges });
   } catch (error) {
@@ -65,19 +78,25 @@ router.post('/', async (req, res) => {
     }
 
     const { title, description, points, category, durationDays, visibility } = req.body;
-    
+
     if (!title || !description) {
       return res.status(400).json({ success: false, message: 'Title and description are required' });
     }
 
+    const days = durationDays || 7;
+    const endDate = new Date();
+    endDate.setDate(endDate.getDate() + days);
+
     const newChallenge = await Challenge.create({
       title,
       description,
-      points: points || 100,
-      category: category || 'creative',
-      durationDays: durationDays || 7,
-      visibility: visibility || 'global',
-      createdBy: req.user._id
+      points:      points || 100,
+      category:    category || 'creative',
+      durationDays: days,
+      endDate,
+      visibility:  visibility || 'global',
+      createdBy:   req.user._id,
+      status:      'active',
     });
 
     return res.status(201).json({ success: true, data: newChallenge });
@@ -95,12 +114,14 @@ router.get('/:id', async (req, res) => {
   try {
     const challenge = await Challenge.findById(req.params.id)
       .populate('participants.userId', 'username oauthAvatarUrl')
+      .populate('winner', 'username oauthAvatarUrl')
+      .populate('closedBy', 'username')
       .lean();
-    
+
     if (!challenge) {
       return res.status(404).json({ success: false, message: 'Challenge not found' });
     }
-    
+
     return res.json({ success: true, data: challenge });
   } catch (error) {
     console.error('[getChallenge]', error);
@@ -122,6 +143,14 @@ router.post('/join', async (req, res) => {
     const challenge = await Challenge.findById(challengeId);
     if (!challenge) {
       return res.status(404).json({ success: false, message: 'Challenge not found' });
+    }
+
+    // Cannot join a closed or terminated challenge
+    if (challenge.status !== 'active') {
+      return res.status(400).json({
+        success: false,
+        message: `This challenge is already ${challenge.status} and cannot be joined.`,
+      });
     }
 
     const alreadyJoined = challenge.participants.some(
@@ -157,6 +186,13 @@ router.post('/:id/submit', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Challenge not found' });
     }
 
+    if (challenge.status !== 'active') {
+      return res.status(400).json({
+        success: false,
+        message: `Submissions are closed. This challenge is ${challenge.status}.`,
+      });
+    }
+
     const participant = challenge.participants.find(
       (p) => p.userId.toString() === req.user._id.toString()
     );
@@ -175,7 +211,7 @@ router.post('/:id/submit', async (req, res) => {
     // Save entry + AI score
     participant.entry       = entry.trim();
     participant.aiScore     = aiScore;
-    participant.score       = aiScore + participant.voteScore;  // combine with any existing votes
+    participant.score       = aiScore + participant.voteScore;
     participant.submittedAt = new Date();
 
     // Rebuild leaderboard after scoring
@@ -216,7 +252,6 @@ router.post('/:id/vote', async (req, res) => {
       return res.status(400).json({ success: false, message: 'candidateUserId is required' });
     }
 
-    // Cannot vote for yourself
     if (candidateUserId === voterId) {
       return res.status(400).json({ success: false, message: 'Cannot vote for yourself' });
     }
@@ -226,7 +261,13 @@ router.post('/:id/vote', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Challenge not found' });
     }
 
-    // Voter must be a participant
+    if (challenge.status !== 'active') {
+      return res.status(400).json({
+        success: false,
+        message: `Voting is closed. This challenge is ${challenge.status}.`,
+      });
+    }
+
     const voterIsParticipant = challenge.participants.some(
       (p) => p.userId.toString() === voterId
     );
@@ -234,7 +275,6 @@ router.post('/:id/vote', async (req, res) => {
       return res.status(403).json({ success: false, message: 'You must join the challenge to vote' });
     }
 
-    // Candidate must be a participant with a submitted entry
     const candidate = challenge.participants.find(
       (p) => p.userId.toString() === candidateUserId
     );
@@ -245,7 +285,6 @@ router.post('/:id/vote', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Candidate has not submitted an entry yet' });
     }
 
-    // Anti-manipulation: max 3 votes per voter per challenge
     const voterVoteCount = challenge.votes.filter(
       (v) => v.voter.toString() === voterId
     ).length;
@@ -257,17 +296,11 @@ router.post('/:id/vote', async (req, res) => {
       });
     }
 
-    // Record vote
-    challenge.votes.push({
-      voter:     req.user._id,
-      candidate: candidateUserId,
-    });
+    challenge.votes.push({ voter: req.user._id, candidate: candidateUserId });
 
-    // Add vote points to candidate
     candidate.voteScore += POINTS_PER_VOTE;
     candidate.score      = candidate.aiScore + candidate.voteScore;
 
-    // Rebuild leaderboard
     rebuildLeaderboard(challenge);
     await challenge.save();
 
@@ -292,6 +325,7 @@ router.get('/:id/leaderboard', async (req, res) => {
   try {
     const challenge = await Challenge.findById(req.params.id)
       .populate('leaderboard.user', 'username oauthAvatarUrl points badges')
+      .populate('winner', 'username oauthAvatarUrl')
       .lean();
 
     if (!challenge) {
@@ -300,7 +334,9 @@ router.get('/:id/leaderboard', async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      title: challenge.title,
+      title:       challenge.title,
+      status:      challenge.status,
+      winner:      challenge.winner,
       leaderboard: challenge.leaderboard,
     });
   } catch (error) {
@@ -309,5 +345,127 @@ router.get('/:id/leaderboard', async (req, res) => {
   }
 });
 
-export default router;
+// ─────────────────────────────────────────────────────────────────────────────
+// CLOSE / COMPLETE CHALLENGE
+// PATCH /api/challenges/:id/close
+// Allowed: challenge creator OR admin
+// Effect:  marks status=completed, sets winner, awards points to top 3
+// ─────────────────────────────────────────────────────────────────────────────
+router.patch('/:id/close', async (req, res) => {
+  try {
+    const challenge = await Challenge.findById(req.params.id);
+    if (!challenge) {
+      return res.status(404).json({ success: false, message: 'Challenge not found' });
+    }
 
+    if (!isCreatorOrAdmin(challenge, req.user)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only the challenge creator or an admin can close this challenge.',
+      });
+    }
+
+    if (challenge.status !== 'active') {
+      return res.status(400).json({
+        success: false,
+        message: `Challenge is already ${challenge.status}.`,
+      });
+    }
+
+    // Rebuild final leaderboard cleanly
+    rebuildLeaderboard(challenge);
+
+    // Determine winner (highest scorer who has submitted an entry)
+    const submitters = challenge.participants
+      .filter((p) => p.entry)
+      .sort((a, b) => b.score - a.score);
+
+    let winnerId = null;
+    if (submitters.length > 0) {
+      winnerId = submitters[0].userId;
+    }
+
+    // Award points to top 3 participants
+    const rewards = [1.0, 0.5, 0.25]; // 100%, 50%, 25% of challenge.points
+    const awardPromises = [];
+    for (let i = 0; i < Math.min(submitters.length, 3); i++) {
+      const pointsToAward = Math.round(challenge.points * rewards[i]);
+      awardPromises.push(
+        User.findByIdAndUpdate(submitters[i].userId, { $inc: { points: pointsToAward } })
+      );
+    }
+    await Promise.all(awardPromises);
+
+    // Mark challenge as completed
+    challenge.status    = 'completed';
+    challenge.winner    = winnerId;
+    challenge.closedAt  = new Date();
+    challenge.closedBy  = req.user._id;
+    await challenge.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Challenge completed successfully. Points have been awarded.',
+      winner:  winnerId,
+      totalParticipants: challenge.participants.length,
+      rewarded: submitters.slice(0, 3).map((p, i) => ({
+        userId:       p.userId,
+        pointsAwarded: Math.round(challenge.points * rewards[i]),
+        finalScore:   p.score,
+      })),
+    });
+
+  } catch (error) {
+    console.error('[closeChallenge]', error);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TERMINATE CHALLENGE (force cancel)
+// PATCH /api/challenges/:id/terminate
+// Allowed: Admin ONLY
+// Effect:  marks status=terminated, NO points awarded
+// ─────────────────────────────────────────────────────────────────────────────
+router.patch('/:id/terminate', async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Only admins can terminate a challenge.',
+      });
+    }
+
+    const { reason } = req.body;
+
+    const challenge = await Challenge.findById(req.params.id);
+    if (!challenge) {
+      return res.status(404).json({ success: false, message: 'Challenge not found' });
+    }
+
+    if (challenge.status !== 'active') {
+      return res.status(400).json({
+        success: false,
+        message: `Challenge is already ${challenge.status}.`,
+      });
+    }
+
+    challenge.status             = 'terminated';
+    challenge.closedAt           = new Date();
+    challenge.closedBy           = req.user._id;
+    challenge.terminationReason  = reason || 'Terminated by administrator.';
+    await challenge.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Challenge has been terminated. No points have been awarded.',
+      reason:  challenge.terminationReason,
+    });
+
+  } catch (error) {
+    console.error('[terminateChallenge]', error);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+export default router;

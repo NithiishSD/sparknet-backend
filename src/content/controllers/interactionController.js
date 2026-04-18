@@ -181,14 +181,27 @@ export const replyToComment = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Reply content is required' });
     }
 
-    const parent = await Comment.findById(commentId);
+    const parent = await Comment.findById(commentId).populate('post');
     if (!parent) {
       return res.status(404).json({ success: false, message: 'Comment not found' });
     }
 
+    // AUTH CHECK: Only post owner can reply to comments on their post
+    const post = parent.post;
+    if (!post) {
+      return res.status(404).json({ success: false, message: 'Post not found' });
+    }
+
+    if (post.user.toString() !== userId.toString()) {
+      return res.status(403).json({ 
+        success: false, 
+        message: 'Only the post owner can reply to comments on this post.' 
+      });
+    }
+
     // Replies don't increment commentCount — they branch off the parent
     const reply = await Comment.create({
-      post:          parent.post,
+      post:          parent.post._id,
       user:          userId,
       content:       content.trim(),
       parentComment: commentId,

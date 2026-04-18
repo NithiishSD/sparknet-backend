@@ -1,6 +1,20 @@
 import mongoose from 'mongoose';
 
 const challengeSchema = new mongoose.Schema({
+  // ── Lifecycle ────────────────────────────────────────────────────────
+  status: {
+    type: String,
+    enum: ['active', 'completed', 'terminated'],
+    default: 'active',
+  },
+  endDate: {
+    type: Date,
+    default: null,  // computed on creation if durationDays is provided
+  },
+  closedAt: { type: Date, default: null },
+  closedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  terminationReason: { type: String, default: null },
+  winner: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   title: { type: String, required: true },
   description: { type: String, required: true },
   points: { type: Number, default: 0 },
